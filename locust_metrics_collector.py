@@ -4,18 +4,24 @@ This module collects additional metrics beyond Locust's default response time me
 """
 import csv
 import time
-import psutil
 import os
 from datetime import datetime
 from locust import events
 import threading
+
+# Try to import psutil, but make it optional
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+    print("Warning: psutil not available. Memory metrics will be limited.")
 
 
 class MetricsCollector:
     """Collects memory usage and scalability metrics during load tests."""
     
     def __init__(self, django_pid=None, output_dir="results", environment=None):
-        self.django_pid = django_pid or self._find_django_process()
         self.output_dir = output_dir
         self.environment = environment
         self.metrics_file = None
@@ -23,6 +29,12 @@ class MetricsCollector:
         self.start_time = None
         self.running = False
         self.metrics_lock = threading.Lock()
+        self.psutil_working = PSUTIL_AVAILABLE
+        
+        # Try to find Django process, handle permission errors
+        self.django_pid = django_pid
+        if not self.django_pid and self.psutil_working:
+            self.django_pid = self._find_django_process()
         
         # Create output directory
         os.makedirs(output_dir, exist_ok=True)
@@ -33,13 +45,23 @@ class MetricsCollector:
     
     def _find_django_process(self):
         """Find the Django process PID by looking for manage.py runserver."""
-        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
-            try:
-                cmdline = proc.info.get('cmdline', [])
-                if cmdline and 'manage.py' in ' '.join(cmdline) and 'runserver' in ' '.join(cmdline):
-                    return proc.info['pid']
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
+        if not self.psutil_working:
+            return None
+        try:
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    cmdline = proc.info.get('cmdline', [])
+                    if cmdline and 'manage.py' in ' '.join(cmdline) and 'runserver' in ' '.join(cmdline):
+                        return proc.info['pid']
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+        except (PermissionError, OSError) as e:
+            print(f"Warning: Cannot enumerate processes: {e}")
+            print("Django process memory metrics will not be available.")
+            self.psutil_working = False
+        except Exception as e:
+            print(f"Warning: Error finding Django process: {e}")
+            self.psutil_working = False
         return None
     
     def on_test_start(self, environment, **kwargs):
@@ -53,17 +75,19 @@ class MetricsCollector:
         self.metrics_file = open(metrics_path, 'w', newline='')
         self.csv_writer = csv.writer(self.metrics_file)
         
-        # Write header
+        # Write header (matching Rails benchmarking format)
         self.csv_writer.writerow([
-            'Timestamp',
-            'Elapsed_Time_Seconds',
-            'Active_Users',
-            'Total_Requests',
-            'Requests_Per_Second',
-            'Memory_Usage_MB',
-            'Memory_Percent',
-            'CPU_Percent',
-            'Total_Posts_In_DB'
+            'timestamp',  # ISO timestamp
+            'elapsed_seconds',  # Seconds since monitoring started
+            'active_users',  # Concurrent users
+            'total_requests',  # Total requests so far
+            'requests_per_second',  # RPS
+            'memory_usage_mb',  # Django process memory (MB)
+            'memory_percent',  # Django process memory (%)
+            'cpu_percent',  # Django process CPU (%)
+            'system_memory_mb',  # System memory used (MB)
+            'system_memory_percent',  # System memory (%)
+            'system_cpu_percent'  # System CPU (%)
         ])
         
         # Start background thread to collect metrics
@@ -104,28 +128,42 @@ class MetricsCollector:
         total_requests = stats.get('total_requests', 0)
         rps = stats.get('rps', 0)
         
-        # Get memory and CPU usage
+        # Get Django process memory and CPU usage
         memory_mb = 0
         memory_percent = 0
         cpu_percent = 0
         
-        if self.django_pid:
+        if self.django_pid and self.psutil_working:
             try:
                 process = psutil.Process(self.django_pid)
                 memory_info = process.memory_info()
                 memory_mb = memory_info.rss / (1024 * 1024)  # Convert to MB
                 memory_percent = process.memory_percent()
                 cpu_percent = process.cpu_percent(interval=0.1)
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
+            except (PermissionError, OSError):
+                self.psutil_working = False
+            except Exception:
                 pass
         
-        # Get total posts in database (scalability metric)
-        total_posts = self._get_total_posts()
+        # Get system-wide memory and CPU usage
+        system_memory_mb = 0
+        system_memory_percent = 0
+        system_cpu_percent = 0
+        if self.psutil_working:
+            try:
+                system_memory = psutil.virtual_memory()
+                system_memory_mb = system_memory.used / (1024 * 1024)  # Convert to MB
+                system_memory_percent = system_memory.percent
+                system_cpu_percent = psutil.cpu_percent(interval=0.1)
+            except (PermissionError, OSError):
+                self.psutil_working = False
+            except Exception:
+                pass
         
-        # Write to CSV
+        # Write to CSV (matching Rails benchmarking format)
         with self.metrics_lock:
             self.csv_writer.writerow([
-                timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                timestamp.isoformat(),  # ISO timestamp format
                 f"{elapsed_time:.2f}",
                 active_users,
                 total_requests,
@@ -133,7 +171,9 @@ class MetricsCollector:
                 f"{memory_mb:.2f}",
                 f"{memory_percent:.2f}",
                 f"{cpu_percent:.2f}",
-                total_posts
+                f"{system_memory_mb:.2f}",
+                f"{system_memory_percent:.2f}",
+                f"{system_cpu_percent:.2f}"
             ])
             self.metrics_file.flush()
     

@@ -39,4 +39,7 @@ echo "  - locust_${TIMESTAMP}_stats.csv (request statistics)"
 echo "  - locust_${TIMESTAMP}_failures.csv (failure details)"
 echo "  - locust_${TIMESTAMP}_exceptions.csv (exceptions)"
 echo "  - locust_report_${TIMESTAMP}.html (HTML report)"
+echo ""
+echo "Formatting CSV files for benchmarking..."
+python3 format_csv_files.py
 

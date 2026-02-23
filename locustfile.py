@@ -210,12 +210,16 @@ class PostsUser(HttpUser):
 def on_locust_init(environment, **kwargs):
     """Initialize metrics collector when Locust starts."""
     if METRICS_ENABLED:
-        # Try to find Django PID or set to None to auto-detect
-        django_pid = os.environ.get('DJANGO_PID', None)
-        if django_pid:
-            django_pid = int(django_pid)
-        
-        output_dir = os.environ.get('LOCUST_METRICS_DIR', 'results')
-        init_metrics_collector(django_pid=django_pid, output_dir=output_dir, environment=environment)
-        print("✓ Memory and scalability metrics collector initialized")
+        try:
+            # Try to find Django PID or set to None to auto-detect
+            django_pid = os.environ.get('DJANGO_PID', None)
+            if django_pid:
+                django_pid = int(django_pid)
+            
+            output_dir = os.environ.get('LOCUST_METRICS_DIR', 'results')
+            init_metrics_collector(django_pid=django_pid, output_dir=output_dir, environment=environment)
+            print("✓ Memory and scalability metrics collector initialized")
+        except Exception as e:
+            print(f"Warning: Could not initialize metrics collector: {e}")
+            print("Locust will continue without custom memory metrics.")
 
