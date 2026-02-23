@@ -1,6 +1,5 @@
 #!/bin/bash
-# Comprehensive load test script for Django CRUD application
-# Runs tests for multiple user counts and durations
+# Load test suite: multiple user counts and durations.
 
 # Configuration
 HOST="http://127.0.0.1:8000"
@@ -42,20 +41,10 @@ get_duration_seconds() {
 }
 
 # Print test plan
-log_message "========================================"
-log_message "Django CRUD Load Test Suite"
-log_message "========================================"
-log_message "Started at: $(date)"
-log_message "Host: $HOST"
-log_message "Test Run ID: $MASTER_TIMESTAMP"
-log_message ""
-log_message "Test Matrix:"
-log_message "  User Counts: ${USER_COUNTS[*]}"
-log_message "  Durations: ${DURATIONS[*]}"
-log_message "  Total Tests: $((${#USER_COUNTS[@]} * ${#DURATIONS[@]}))"
-log_message ""
-log_message "Results will be saved to: $TEST_RUN_DIR"
-log_message "========================================"
+log_message "Load test suite started $(date)"
+log_message "Host: $HOST | Run: $MASTER_TIMESTAMP"
+log_message "Matrix: ${USER_COUNTS[*]} users x ${DURATIONS[*]} → $((${#USER_COUNTS[@]} * ${#DURATIONS[@]})) tests"
+log_message "Output: $TEST_RUN_DIR"
 log_message ""
 
 # Check if Django server is running
@@ -65,7 +54,17 @@ if ! curl -s "$HOST" > /dev/null 2>&1; then
     exit 1
 fi
 
-log_message "✓ Django server is running at $HOST"
+log_message "Django server OK at $HOST"
+
+if command -v ps &>/dev/null; then
+    DJANGO_PID=$(ps -eo pid,rss,command 2>/dev/null | grep -E '[m]anage\.py.*runserver' | sort -k2 -rn | head -1 | awk '{print $1}')
+    if [ -n "$DJANGO_PID" ]; then
+        export DJANGO_PID
+        log_message "Django PID (app-only metrics): $DJANGO_PID"
+    else
+        log_message "Tip: Set DJANGO_PID for app-only metrics (e.g. from Activity Monitor)."
+    fi
+fi
 log_message ""
 
 # Counter for test progress
@@ -115,9 +114,9 @@ for users in "${USER_COUNTS[@]}"; do
         
         # Check if test completed successfully
         if [ $? -eq 0 ]; then
-            log_message "✓ Test $TEST_ID completed successfully"
+            log_message "OK $TEST_ID"
         else
-            log_message "✗ Test $TEST_ID failed"
+            log_message "FAILED $TEST_ID"
         fi
         
         # Save test metadata
@@ -146,14 +145,10 @@ EOF
     done
 done
 
-log_message "========================================"
-log_message "All tests completed!"
-log_message "Finished at: $(date)"
-log_message "========================================"
+log_message "All tests finished $(date)"
 log_message ""
 
-# Generate summary report
-log_message "Generating summary report..."
+log_message "Generating summary..."
 
 SUMMARY_FILE="${TEST_RUN_DIR}/summary.csv"
 echo "test_id,users,duration,total_requests,failures,avg_response_time_ms,median_response_time_ms,p95_response_time_ms,p99_response_time_ms,max_response_time_ms,requests_per_sec" > "$SUMMARY_FILE"
@@ -166,10 +161,8 @@ for users in "${USER_COUNTS[@]}"; do
         STATS_FILE="${TEST_RUN_DIR}/${TEST_ID}/locust_stats.csv"
         
         if [ -f "$STATS_FILE" ]; then
-            # Extract aggregated stats (last row with "Aggregated" type)
             AGGREGATED=$(grep "Aggregated" "$STATS_FILE" | tail -1)
             if [ -n "$AGGREGATED" ]; then
-                # Parse CSV fields (this is a simplified extraction)
                 echo "${TEST_ID},${users},${duration_label},${AGGREGATED}" | \
                     awk -F',' '{print $1","$2","$3","$5","$6","$8","$10","$14","$15","$17","$18}' >> "$SUMMARY_FILE"
             fi
@@ -180,25 +173,6 @@ done
 log_message "Summary saved to: $SUMMARY_FILE"
 log_message ""
 
-# Format CSV files for benchmarking analysis
-log_message "Formatting CSV files for benchmarking analysis..."
+log_message "Formatting CSVs..."
 python3 format_csv_files.py --input-dir "$TEST_RUN_DIR"
-
-log_message ""
-log_message "========================================"
-log_message "TEST RUN COMPLETE"
-log_message "========================================"
-log_message "All results are in: $TEST_RUN_DIR"
-log_message ""
-log_message "Files generated per test:"
-log_message "  - locust_stats.csv         (Request statistics)"
-log_message "  - locust_stats_history.csv (Time-series stats)"
-log_message "  - locust_failures.csv      (Failure details)"
-log_message "  - metrics_memory_*.csv     (Memory & scalability)"
-log_message "  - report.html              (Visual HTML report)"
-log_message "  - test_info.json           (Test configuration)"
-log_message ""
-log_message "Summary files:"
-log_message "  - summary.csv              (All tests summary)"
-log_message "  - test_run.log             (Complete log)"
-log_message "========================================"
+log_message "Results in: $TEST_RUN_DIR"

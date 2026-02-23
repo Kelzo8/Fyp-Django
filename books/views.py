@@ -6,8 +6,6 @@ from .models import Post
 
 
 def post_list(request):
-    """Display all posts."""
-    # Track custom metrics for scalability
     newrelic.agent.record_custom_metric("Custom/Posts/TotalCount", Post.objects.count())
     
     posts = Post.objects.all().order_by("id")
@@ -25,7 +23,6 @@ def post_create(request):
                 title=title,
                 author=author,
             )
-            # Track scalability metric - posts created
             newrelic.agent.record_custom_metric("Custom/Posts/Created", 1)
             return redirect(reverse("post_list"))
 
@@ -44,7 +41,6 @@ def post_update(request, id):
             post.title = title
             post.author = author
             post.save()
-            # Track scalability metric - posts updated
             newrelic.agent.record_custom_metric("Custom/Posts/Updated", 1)
             return redirect(reverse("post_list"))
 
@@ -57,7 +53,6 @@ def post_delete(request, id):
 
     if request.method == "POST":
         post.delete()
-        # Track scalability metric - posts deleted
         newrelic.agent.record_custom_metric("Custom/Posts/Deleted", 1)
         return redirect(reverse("post_list"))
 
