@@ -1,2 +1,2 @@
-# Fyp-Django2
+# Fyp-Django
 Django CRUD application as part of my FYP
